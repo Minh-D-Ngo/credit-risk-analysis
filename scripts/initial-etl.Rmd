@@ -13,14 +13,96 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(tidyverse)
 
-loans_raw <- read_csv("data-raw/2024-pudb.csv")
+loans_raw <- read_csv("../data-raw/2024-pudb.csv")
 
-glimpse(loans_raw)
-
+loans_raw.head()
 ```
 
 ```{r}
+# Check missingness for borrower 2
+borrower2_check <- loans_raw %>%
+  mutate(
+    b2_credit_missing = (Borrower2CreditScoreValue == 9),
+    b2_age_missing = Borrower2AgeAtApplicationYears %in% c(998, 999),
 
+    # define "borrower 2 exists"
+    b2_exists = !(b2_credit_missing & b2_age_missing)
+  )
+
+# Summary
+borrower2_check %>%
+  summarise(
+    total_rows = n(),
+
+    borrower2_exists = sum(b2_exists, na.rm = TRUE),
+    pct_exists = mean(b2_exists, na.rm = TRUE),
+
+    usable_credit = sum(!b2_credit_missing, na.rm = TRUE),
+    pct_credit_available = mean(!b2_credit_missing, na.rm = TRUE),
+
+    usable_age = sum(!b2_age_missing, na.rm = TRUE),
+    pct_age_available = mean(!b2_age_missing, na.rm = TRUE)
+  )
 
 ```
 
+
+```{r}
+cols_to_keep <- c(
+  # IDs / context
+  "Year",
+  "LoanCharacteristicsID",
+  "Bank",
+  "FIPSStateNumericCode",
+  "FIPSCountyCode",
+  "CoreBasedStatisticalAreaCode",
+
+  # Neighborhood / area context
+  "CensusTractMinorityRatioPercent",
+  "CensusTractMedFamIncomeAmount",
+  "LocalAreaMedianIncomeAmount",
+  "HUDMedianIncomeAmount",
+
+  # Core borrower / loan financials
+  "TotalMonthlyIncomeAmount",
+  "LTVRatioPercent",
+  "NoteRatePercent",
+  "NoteAmount",
+  "HousingExpenseRatioPercent",
+  "TotalDebtExpenseRatioPercent",
+  "Borrower1CreditScoreValue",
+  "Borrower2CreditScoreValue",
+  "PMICoveragePercent",
+
+  # Loan characteristics
+  "LoanPurposeType",
+  "ProductCategoryName",
+  "MortgageType",
+  "ScheduledTotalPaymentCount",
+  "LoanAmortizationMaxTermMonths",
+  "MortgageLoanSellerInstType",
+  "PropertyUsageType",
+  "PropertyUnitCount",
+  "PropertyType",
+
+  # Borrower characteristics
+  "BorrowerCount",
+  "BorrowerFirstTimeHomebuyer",
+  "Borrower1AgeAtApplicationYears",
+  "Borrower2AgeAtApplicationYears",
+  "Borrower1SexType",
+  "Borrower2SexType",
+  "Borrower1Race1Type",
+  "Borrower2Race1Type",
+  "EmploymentBorrowerSelfEmployed"
+)
+
+fhfa_master <- loans_raw %>%
+  select(any_of(cols_to_keep))
+
+head(fhfa_master)
+```
+
+```{r}
+write_csv(fhfa_master, "../data-clean/pudb_reduced.csv")
+```

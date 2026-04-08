@@ -8,3 +8,19 @@ output: pdf_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+
+
+```{r}
+library(tidyverse)
+
+loans_raw <- read_csv("data-raw/2024-pudb.csv")
+
+glimpse(loans_raw)
+
+```
+
+```{r}
+
+
+```
+

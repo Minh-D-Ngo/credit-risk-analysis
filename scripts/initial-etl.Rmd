@@ -14,8 +14,6 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 
 loans_raw <- read_csv("../data-raw/2024-pudb.csv")
-
-loans_raw.head()
 ```
 
 ```{r}
@@ -106,3 +104,44 @@ head(fhfa_master)
 ```{r}
 write_csv(fhfa_master, "../data-clean/pudb_reduced.csv")
 ```
+
+```{r}
+fhfa_clean <- fhfa_master %>%
+  mutate(
+    # Credit scores
+    Borrower1CreditScoreValue = na_if(Borrower1CreditScoreValue, 9),
+    Borrower2CreditScoreValue = na_if(Borrower2CreditScoreValue, 9),
+
+    # Age
+    Borrower1AgeAtApplicationYears = na_if(Borrower1AgeAtApplicationYears, 999),
+    Borrower1AgeAtApplicationYears = na_if(Borrower1AgeAtApplicationYears, 998),
+    Borrower2AgeAtApplicationYears = na_if(Borrower2AgeAtApplicationYears, 999),
+    Borrower2AgeAtApplicationYears = na_if(Borrower2AgeAtApplicationYears, 998),
+
+    # Race
+    Borrower1Race1Type = ifelse(Borrower1Race1Type %in% c(6,7), NA, Borrower1Race1Type),
+    Borrower2Race1Type = ifelse(Borrower2Race1Type %in% c(6,7), NA, Borrower2Race1Type),
+
+    # Sex
+    Borrower1SexType = ifelse(Borrower1SexType %in% c(3,4,6), NA, Borrower1SexType),
+    Borrower2SexType = ifelse(Borrower2SexType %in% c(3,4,6), NA, Borrower2SexType)
+  )
+```
+
+```{r}
+fhfa_clean <- fhfa_clean %>%
+  mutate(
+    TotalMonthlyIncomeAmount = as.numeric(TotalMonthlyIncomeAmount),
+    LTVRatioPercent = as.numeric(LTVRatioPercent),
+    NoteRatePercent = as.numeric(NoteRatePercent),
+    TotalDebtExpenseRatioPercent = as.numeric(TotalDebtExpenseRatioPercent),
+    NoteAmount = as.numeric(NoteAmount)
+  )
+```
+
+```{r}
+summary(fhfa_clean)
+
+```
+
+

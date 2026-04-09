@@ -101,9 +101,6 @@ fhfa_master <- loans_raw %>%
 head(fhfa_master)
 ```
 
-```{r}
-write_csv(fhfa_master, "../data-clean/pudb_reduced.csv")
-```
 
 ```{r}
 fhfa_clean <- fhfa_master %>%
@@ -143,5 +140,113 @@ fhfa_clean <- fhfa_clean %>%
 summary(fhfa_clean)
 
 ```
+```{r}
+fhfa_clean2 <- fhfa_clean %>%
+  mutate(
+    # monthly income of 999999 is likely a cap / placeholder-like extreme
+    TotalMonthlyIncomeAmount = if_else(
+      TotalMonthlyIncomeAmount > 100000,
+      NA_real_,
+      TotalMonthlyIncomeAmount
+    ),
+
+    # LTV above 100 is possible in edge cases, but if you want a cleaner
+    # modeling dataset, cap them to NA for now
+    LTVRatioPercent = if_else(
+      LTVRatioPercent > 100,
+      NA_real_,
+      LTVRatioPercent
+    ),
+
+    # guard against impossible nonpositive financial values
+    TotalMonthlyIncomeAmount = if_else(
+      TotalMonthlyIncomeAmount <= 0,
+      NA_real_,
+      TotalMonthlyIncomeAmount
+    ),
+    NoteAmount = if_else(
+      NoteAmount <= 0,
+      NA_real_,
+      NoteAmount
+    ),
+    NoteRatePercent = if_else(
+      NoteRatePercent <= 0,
+      NA_real_,
+      NoteRatePercent
+    ),
+    TotalDebtExpenseRatioPercent = if_else(
+      TotalDebtExpenseRatioPercent < 0,
+      NA_real_,
+      TotalDebtExpenseRatioPercent
+    ),
+    HousingExpenseRatioPercent = if_else(
+      HousingExpenseRatioPercent < 0,
+      NA_real_,
+      HousingExpenseRatioPercent
+    )
+  )
 
 
+missing_summary_after <- tibble(
+  variable = names(fhfa_clean2),
+  missing_n = colSums(is.na(fhfa_clean2)),
+  missing_pct = colSums(is.na(fhfa_clean2)) / nrow(fhfa_clean2) * 100
+) %>%
+  arrange(desc(missing_n))
+
+missing_summary_after
+```
+```{r}
+fhfa_master_clean <- fhfa_clean2 %>%
+  filter(
+    !is.na(NoteRatePercent),
+    !is.na(TotalMonthlyIncomeAmount),
+    !is.na(LTVRatioPercent),
+    !is.na(TotalDebtExpenseRatioPercent),
+    !is.na(Borrower1CreditScoreValue)
+  )
+```
+
+```{r}
+fhfa_master_clean <- fhfa_master_clean %>%
+  mutate(
+    min_credit_score = pmin(
+      Borrower1CreditScoreValue,
+      Borrower2CreditScoreValue,
+      na.rm = TRUE
+    ),
+    min_credit_score = ifelse(is.infinite(min_credit_score), NA, min_credit_score),
+
+    avg_age = rowMeans(
+      cbind(Borrower1AgeAtApplicationYears, Borrower2AgeAtApplicationYears),
+      na.rm = TRUE
+    ),
+    avg_age = ifelse(is.nan(avg_age), NA, avg_age)
+  )
+```
+
+```{r}
+fhfa_master_clean <- fhfa_master_clean %>%
+  mutate(
+    TotalMonthlyIncomeAmount = ifelse(TotalMonthlyIncomeAmount > 100000, NA, TotalMonthlyIncomeAmount),
+    LTVRatioPercent = ifelse(LTVRatioPercent > 100, NA, LTVRatioPercent)
+  ) %>%
+  filter(
+    !is.na(TotalMonthlyIncomeAmount),
+    !is.na(LTVRatioPercent)
+  )
+
+missing_summary_after <- tibble(
+  variable = names(fhfa_master_clean),
+  missing_n = colSums(is.na(fhfa_master_clean)),
+  missing_pct = colSums(is.na(fhfa_master_clean)) / nrow(fhfa_master_clean) * 100
+) %>%
+  arrange(desc(missing_n))
+
+missing_summary_after
+```
+
+
+```{r}
+write_csv(fhfa_master_clean, "../data-clean/pudb_master_clean.csv")
+```

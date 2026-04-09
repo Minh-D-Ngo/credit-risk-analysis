@@ -13,6 +13,80 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(tidyverse)
 
-loans_raw <- read_csv("../data-raw/2024-pudb.csv")
+fhfa_master_clean <- read.csv("../data-clean/pudb_master_clean.csv")
 ```
 
+```{r}
+head(fhfa_master_clean)
+```
+
+```{r}
+cluster_data <- fhfa_master_clean %>%
+  select(
+    LoanCharacteristicsID,
+    TotalMonthlyIncomeAmount,
+    LTVRatioPercent,
+    TotalDebtExpenseRatioPercent,
+    min_credit_score
+  ) %>%
+  drop_na()
+```
+
+```{r}
+cluster_scaled <- cluster_data %>%
+  select(-LoanCharacteristicsID) %>%
+  mutate(across(everything(), scale))
+```
+
+```{r}
+set.seed(1)
+
+kmeans_result <- kmeans(cluster_scaled, centers = 4)
+
+cluster_data <- cluster_data %>%
+  mutate(cluster = as.factor(kmeans_result$cluster))
+```
+
+```{r}
+fhfa_clustered <- fhfa_master_clean %>%
+  left_join(
+    cluster_data %>% select(LoanCharacteristicsID, cluster),
+    by = "LoanCharacteristicsID"
+  )
+```
+
+
+```{r}
+nrow(fhfa_master_clean)
+nrow(fhfa_clustered)
+```
+
+```{r}
+cluster_summary <- fhfa_clustered %>%
+  group_by(cluster) %>%
+  summarise(
+    avg_income = mean(TotalMonthlyIncomeAmount, na.rm = TRUE),
+    avg_credit = mean(min_credit_score, na.rm = TRUE),
+    avg_ltv = mean(LTVRatioPercent, na.rm = TRUE),
+    avg_dti = mean(TotalDebtExpenseRatioPercent, na.rm = TRUE),
+    avg_rate = mean(NoteRatePercent, na.rm = TRUE),
+    count = n()
+  )
+
+cluster_summary
+
+```
+
+
+```{r}
+cluster_labels <- tibble(
+  cluster = as.factor(c(1,2,3,4)),
+  label = c(
+    "High Risk / Financially Stressed",
+    "High Credit / High Leverage",
+    "High Income / Low Risk",
+    "Low Leverage / Safe"
+  )
+)
+
+```

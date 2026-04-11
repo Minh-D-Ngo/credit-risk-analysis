@@ -1,0 +1,293 @@
+---
+title: "DTI Financial Risk Model"
+author: "Smit_velani"
+date: "2026-04-09"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r packages}
+library(tidyverse)
+library(caret)
+library(corrplot)
+library(car)
+library(broom)
+library(scales)
+library(gridExtra)
+```
+
+```{r load-data}
+df_raw <- read_csv("C:/Users/velan/OneDrive/Desktop/DS project/pudb_master_clean.csv")
+
+cat("Rows:", nrow(df_raw), " | Cols:", ncol(df_raw), "\n")
+
+df <- df_raw %>%
+  select(
+    ltv          = LTVRatioPercent,
+    dti          = TotalDebtExpenseRatioPercent,
+    income       = TotalMonthlyIncomeAmount,
+    credit_score = min_credit_score,
+    age          = avg_age,
+    first_time   = BorrowerFirstTimeHomebuyer,
+    note_rate    = NoteRatePercent,
+    loan_purpose = LoanPurposeType,
+    prop_use     = PropertyUsageType
+  ) %>%
+  mutate(
+    first_time_fct = factor(first_time,
+                            levels = c(0, 1),
+                            labels = c("Not First-Time", "First-Time")),
+    credit_grp = factor(credit_score,
+                        levels = 1:5,
+                        labels = c("Poor (<620)",
+                                   "Below Fair (620-659)",
+                                   "Fair (660-699)",
+                                   "Good (700-759)",
+                                   "Excellent (760+)")),
+    loan_purpose_fct = factor(loan_purpose,
+                              levels = c(1, 2, 6),
+                              labels = c("Purchase", "Refinance", "Cash-Out Refi")),
+    prop_use_fct = factor(prop_use,
+                          levels = c(1, 2),
+                          labels = c("Primary", "Investment/Second")),
+    income_band = case_when(
+      income < 5000  ~ "Low (<$5k/mo)",
+      income < 10000 ~ "Lower-Mid ($5-10k)",
+      income < 20000 ~ "Upper-Mid ($10-20k)",
+      TRUE           ~ "High (>$20k/mo)"
+    ),
+    income_band = factor(income_band,
+                         levels = c("Low (<$5k/mo)", "Lower-Mid ($5-10k)",
+                                    "Upper-Mid ($10-20k)", "High (>$20k/mo)"))
+  )
+
+cat("\nKey variable summary:\n")
+summary(df[c("ltv", "dti", "income", "credit_score", "age")])
+```
+
+```{r eda-distributions}
+# 2a. DTI distribution
+p1 <- ggplot(df, aes(x = dti)) +
+  geom_histogram(bins = 40, fill = "#d7191c", color = "white") +
+  geom_vline(xintercept = c(30, 43), color = "darkred",
+             linetype = "dashed", linewidth = 1) +
+  annotate("text", x = 32, y = Inf, label = "30% threshold",
+           vjust = 2, color = "darkred", size = 3.5) +
+  annotate("text", x = 45, y = Inf, label = "43% threshold",
+           vjust = 2, color = "darkred", size = 3.5) +
+  labs(title = "Distribution of DTI Ratio",
+       x = "DTI (%)", y = "Count") +
+  theme_minimal()
+
+# 2b. LTV distribution (for reference)
+p2 <- ggplot(df, aes(x = ltv)) +
+  geom_histogram(bins = 40, fill = "#2c7bb6", color = "white") +
+  geom_vline(xintercept = 80, color = "red",
+             linetype = "dashed", linewidth = 1) +
+  labs(title = "Distribution of LTV Ratio (Reference)",
+       x = "LTV (%)", y = "Count") +
+  theme_minimal()
+
+grid.arrange(p1, p2, ncol = 2)
+```
+
+```{r eda-dti-by-groups}
+# DTI by credit score group
+ggplot(df, aes(x = credit_grp, y = dti, fill = credit_grp)) +
+  geom_boxplot(outlier.alpha = 0.3) +
+  geom_hline(yintercept = 43, color = "red", linetype = "dashed") +
+  labs(title = "DTI by Credit Score Group",
+       subtitle = "Red dashed line = 43% high-risk DTI threshold",
+       x = "Credit Score Group", y = "DTI (%)") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+```{r eda-dti-firsttime}
+# DTI by first-time buyer status
+ggplot(df, aes(x = first_time_fct, y = dti, fill = first_time_fct)) +
+  geom_boxplot() +
+  labs(title = "DTI by First-Time Homebuyer Status",
+       x = "", y = "DTI (%)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+```{r eda-income-dti-scatter}
+# Income vs DTI scatter (sample for speed)
+ggplot(df %>% sample_n(5000), aes(x = income, y = dti, color = credit_grp)) +
+  geom_point(alpha = 0.4, size = 1.2) +
+  geom_smooth(method = "lm", se = FALSE, color = "black", linewidth = 0.8) +
+  scale_x_continuous(labels = dollar_format(prefix = "$")) +
+  labs(title = "Income vs DTI (sample of 5,000)",
+       x = "Monthly Income", y = "DTI (%)", color = "Credit Group") +
+  theme_minimal()
+```
+
+```{r eda-dti-income-band}
+# DTI by income band
+ggplot(df, aes(x = income_band, y = dti, fill = income_band)) +
+  geom_boxplot() +
+  labs(title = "DTI by Income Band",
+       x = "Income Band", y = "DTI (%)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+```{r eda-correlation}
+# Correlation matrix
+cor_vars <- df %>%
+  select(ltv, dti, income, credit_score, age, first_time, note_rate) %>%
+  cor(use = "complete.obs")
+
+corrplot(cor_vars,
+         method    = "color",
+         type      = "upper",
+         addCoef.col = "black",
+         tl.col    = "black",
+         tl.srt    = 45,
+         title     = "Correlation Matrix — Key Variables",
+         mar       = c(0, 0, 1, 0))
+```
+
+```{r train-test-split}
+# 3a. Train / Test Split (80/20)
+set.seed(123)
+train_idx  <- createDataPartition(df$dti, p = 0.80, list = FALSE)
+train_data <- df[train_idx, ]
+test_data  <- df[-train_idx, ]
+
+cat("\nTrain rows:", nrow(train_data),
+    " | Test rows:", nrow(test_data), "\n")
+```
+
+```{r fit-model}
+# 3b. Fit OLS Model — DTI as dependent variable
+model_dti <- lm(
+  dti ~ income + credit_score + age + first_time +
+        ltv + loan_purpose + prop_use,
+  data = train_data
+)
+
+cat("\n Financial Risk Model (DTI) \n")
+print(summary(model_dti))
+```
+
+```{r coefficient-table}
+# 3c. Tidy Coefficient Table
+cat("\nCoefficient Table:\n")
+print(tidy(model_dti, conf.int = TRUE))
+```
+
+```{r vif-check}
+# 3d. VIF — Multicollinearity Check
+cat("\nVIF (values >5 indicate multicollinearity):\n")
+print(vif(model_dti))
+```
+
+```{r test-metrics}
+# 3e. Predict on Test Set and Compute Metrics
+preds_dti <- predict(model_dti, newdata = test_data)
+
+r2_test  <- cor(preds_dti, test_data$dti)^2
+rmse_dti <- RMSE(preds_dti, test_data$dti)
+mae_dti  <- MAE(preds_dti, test_data$dti)
+
+cat(sprintf("\n Test Set Performance \n"))
+cat(sprintf(" R²   : %.4f\n", r2_test))
+cat(sprintf(" RMSE : %.4f\n", rmse_dti))
+cat(sprintf(" MAE  : %.4f\n", mae_dti))
+```
+
+```{r cross-validation}
+# 3f. 5-Fold Cross-Validation
+cv_ctrl <- trainControl(method = "cv", number = 5)
+
+model_cv <- train(
+  dti ~ income + credit_score + age + first_time +
+        ltv + loan_purpose + prop_use,
+  data      = train_data,
+  method    = "lm",
+  trControl = cv_ctrl
+)
+
+cat("\n 5-Fold Cross-Validation \n")
+print(model_cv$results)
+```
+
+```{r residual-diagnostics}
+# 3g. Residual Diagnostics
+par(mfrow = c(2, 2))
+plot(model_dti, main = "DTI Model — Residual Diagnostics")
+par(mfrow = c(1, 1))
+```
+
+```{r predicted-vs-actual}
+# 3h. Predicted vs Actual Plot
+pred_df <- data.frame(actual = test_data$dti, predicted = preds_dti)
+
+ggplot(pred_df, aes(x = actual, y = predicted)) +
+  geom_point(alpha = 0.3, color = "#d7191c", size = 1) +
+  geom_abline(slope = 1, intercept = 0, color = "red",
+              linetype = "dashed", linewidth = 1) +
+  labs(title = "Financial Risk Model: Predicted vs Actual DTI",
+       subtitle = sprintf("Test R² = %.4f | RMSE = %.2f | MAE = %.2f",
+                          r2_test, rmse_dti, mae_dti),
+       x = "Actual DTI (%)", y = "Predicted DTI (%)") +
+  theme_minimal()
+```
+
+```{r coefficient-plot}
+# 3i. Coefficient Plot
+coef_df <- tidy(model_dti, conf.int = TRUE) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(
+    significant = ifelse(p.value < 0.05, "p<0.05", "p>0.05"),
+    term = case_when(
+      term == "income"       ~ "Monthly Income",
+      term == "credit_score" ~ "Credit Score (1-5)",
+      term == "age"          ~ "Avg Age",
+      term == "first_time"   ~ "First-Time Buyer",
+      term == "ltv"          ~ "LTV Ratio",
+      term == "loan_purpose" ~ "Loan Purpose",
+      term == "prop_use"     ~ "Property Use",
+      TRUE ~ term
+    )
+  )
+
+ggplot(coef_df, aes(x = reorder(term, estimate),
+                    y = estimate, color = significant)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  coord_flip() +
+  scale_color_manual(values = c("p<0.05" = "#2c7bb6", "p>0.05" = "#d7191c")) +
+  labs(title = "Coefficient Plot — Financial Risk Model (DTI)",
+       subtitle = "Error bars = 95% CI",
+       x = NULL, y = "Coefficient Estimate", color = "Significance") +
+  theme_minimal()
+```
+
+```{r final-summary}
+# 4. Final Summary
+cat("\n", strrep("=", 50), "\n")
+cat("FINANCIAL RISK MODEL (DTI) — FINAL RESULTS\n")
+cat(strrep("=", 50), "\n")
+cat(sprintf("Training R²   : %.4f\n", summary(model_dti)$r.squared))
+cat(sprintf("Adjusted R²   : %.4f\n", summary(model_dti)$adj.r.squared))
+cat(sprintf("Test R²       : %.4f\n", r2_test))
+cat(sprintf("Test RMSE     : %.4f\n", rmse_dti))
+cat(sprintf("Test MAE      : %.4f\n", mae_dti))
+cat(sprintf("CV R²         : %.4f\n", model_cv$results$Rsquared))
+cat("\nAll variables and their significance:\n")
+print(tidy(model_dti) %>%
+        select(term, estimate, p.value) %>%
+        mutate(significant = ifelse(p.value < 0.05, "YES", "NO")) %>%
+        arrange(p.value))
+```
